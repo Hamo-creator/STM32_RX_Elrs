@@ -1,0 +1,72 @@
+/*
+ * crsf_serial.h
+ *
+ *  Created on: Apr 14, 2025
+ *      Author: Khalil
+ */
+
+#ifndef CRSF_SERIAL_H
+#define CRSF_SERIAL_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "crc8.h"
+#include "crsf_protocol.h"
+#include "stm32f4xx_hal.h"  // Adjust to your STM32 series if needed
+
+typedef enum {
+    FSA_NO_PULSES,
+    FSA_HOLD
+} eFailsafeAction;
+
+#define CRSF_PACKET_TIMEOUT_MS     100
+#define CRSF_FAILSAFE_STAGE1_MS    300
+
+extern uint8_t rx_dma_byte;  // One byte buffer
+
+typedef struct {
+    UART_HandleTypeDef *huart;
+
+    uint8_t rxBuf[CRSF_MAX_PACKET_SIZE];
+    uint8_t rxBufPos;
+    Crc8_HandleTypeDef crc;
+    crsfLinkStatistics_t linkStatistics;
+    crsf_sensor_gps_t gpsSensor;
+    uint32_t baud;
+    uint32_t lastReceive;
+    uint32_t lastChannelsPacket;
+    bool linkIsUp;
+    uint32_t passthroughBaud;
+    int channels[CRSF_NUM_CHANNELS];
+
+    // Event Handlers
+    void (*onLinkUp)(void);
+    void (*onLinkDown)(void);
+    void (*onOobData)(uint8_t b);
+    void (*onPacketChannels)(void);
+    void (*onPacketLinkStatistics)(crsfLinkStatistics_t *ls);
+    void (*onPacketGps)(crsf_sensor_gps_t *gpsSensor);
+} CrsfSerial_HandleTypeDef;
+
+// Initialization
+void CrsfSerial_Init(CrsfSerial_HandleTypeDef *hcrsf, UART_HandleTypeDef *huart, uint32_t baud);
+
+// Usage
+void CrsfSerial_Begin(CrsfSerial_HandleTypeDef *hcrsf, uint32_t baud);
+void CrsfSerial_Loop(CrsfSerial_HandleTypeDef *hcrsf);
+void CrsfSerial_WriteByte(CrsfSerial_HandleTypeDef *hcrsf, uint8_t b);
+void CrsfSerial_WriteBuffer(CrsfSerial_HandleTypeDef *hcrsf, const uint8_t *buf, uint16_t len);
+void CrsfSerial_QueuePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t type, const void *payload, uint8_t len);
+void CrsfSerial_QueuePacketChannels(CrsfSerial_HandleTypeDef *hcrsf);
+
+// Accessors
+int CrsfSerial_GetChannel(CrsfSerial_HandleTypeDef *hcrsf, unsigned int ch);
+void CrsfSerial_SetChannel(CrsfSerial_HandleTypeDef *hcrsf, unsigned int ch, unsigned int value_us);
+const crsfLinkStatistics_t *CrsfSerial_GetLinkStatistics(CrsfSerial_HandleTypeDef *hcrsf);
+const crsf_sensor_gps_t *CrsfSerial_GetGpsSensor(CrsfSerial_HandleTypeDef *hcrsf);
+bool CrsfSerial_IsLinkUp(CrsfSerial_HandleTypeDef *hcrsf);
+bool CrsfSerial_GetPassthroughMode(CrsfSerial_HandleTypeDef *hcrsf);
+void CrsfSerial_SetPassthroughMode(CrsfSerial_HandleTypeDef *hcrsf, bool val, uint32_t passthroughBaud);
+
+#endif // CRSF_SERIAL_H
+

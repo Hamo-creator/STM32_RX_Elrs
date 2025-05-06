@@ -1,0 +1,44 @@
+/*
+ * servo_control.c
+ *
+ *  Created on: May 6, 2025
+ *      Author: Khalil
+ */
+
+#include "servo_control.h"
+
+void ServoControl_Init(void) {
+    // Start all configured PWM channels
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);  // Throttle
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);  // Rudder
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);  // Elevator
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  // Aileron
+}
+
+void ServoControl_Update(const int16_t *channels) {
+    int throttle_us = channels[CHANNEL_THROTTLE];
+    int rudder_us   = channels[CHANNEL_RUDDER];
+    int elevator_us = channels[CHANNEL_ELEVATOR];
+    int aileron_us  = channels[CHANNEL_AILERON];
+
+    // Clamp values to safe servo range
+    if (throttle_us < SERVO_MIN_US) throttle_us = SERVO_MIN_US;
+    if (throttle_us > SERVO_MAX_US) throttle_us = SERVO_MAX_US;
+
+    if (rudder_us < SERVO_MIN_US) rudder_us = SERVO_MIN_US;
+    if (rudder_us > SERVO_MAX_US) rudder_us = SERVO_MAX_US;
+
+    if (elevator_us < SERVO_MIN_US) elevator_us = SERVO_MIN_US;
+    if (elevator_us > SERVO_MAX_US) elevator_us = SERVO_MAX_US;
+
+    if (aileron_us < SERVO_MIN_US) aileron_us = SERVO_MIN_US;
+    if (aileron_us > SERVO_MAX_US) aileron_us = SERVO_MAX_US;
+
+    // Update PWM pulse widths
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, throttle_us);
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, rudder_us);
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, elevator_us);
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, aileron_us);
+}
+
+

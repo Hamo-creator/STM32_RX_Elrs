@@ -1,0 +1,3 @@
+../Core/Src/crc8.c:10:6:Crc8_Init	4
+../Core/Src/crc8.c:23:9:Crc8_Calculate	2
+../Core/Src/crc8.c:33:9:crc8_dvb_s2	4

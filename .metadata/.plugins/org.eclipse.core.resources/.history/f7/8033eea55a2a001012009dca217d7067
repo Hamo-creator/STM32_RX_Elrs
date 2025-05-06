@@ -1,0 +1,30 @@
+/*
+ * servo_control.h
+ *
+ *  Created on: May 6, 2025
+ *      Author: Khalil
+ */
+
+#ifndef SERVO_CONTROL_H_
+#define SERVO_CONTROL_H_
+
+#include "tim.h"  // Include HAL timer handles
+
+// Map your RC channel indices to servo roles
+#define CHANNEL_THROTTLE  0
+#define CHANNEL_RUDDER    1
+#define CHANNEL_ELEVATOR  2
+#define CHANNEL_AILERON   3
+
+// Servo signal limits in microseconds
+#define SERVO_MIN_US 1000
+#define SERVO_MAX_US 2000
+
+// Initializes all PWM timers (TIM2, TIM3)
+void ServoControl_Init(void);
+
+// Updates all servos with current RC values
+void ServoControl_Update(const int16_t *channels);
+
+
+#endif /* INC_SERVO_CONTROL_H_ */
