@@ -7,10 +7,6 @@
 
 #include "servo_control.h"
 
-int map(int value, int in_min, int in_max, int out_min, int out_max) {
-    return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
-
 void ServoControl_Init(void) {
     // Start all configured PWM channels
     HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);  // Throttle
@@ -20,15 +16,10 @@ void ServoControl_Init(void) {
 }
 
 void ServoControl_Update(const int *channels) {
-//    int throttle_us = channels[CHANNEL_THROTTLE];
-//    int rudder_us   = channels[CHANNEL_RUDDER];
-//    int elevator_us = channels[CHANNEL_ELEVATOR];
-//    int aileron_us  = channels[CHANNEL_AILERON];
-
-    int throttle_us = map(channels[CHANNEL_THROTTLE], 172, 1811, 1000, 2000);
-    int rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);
-    int elevator_us = map(channels[CHANNEL_ELEVATOR], 172, 1811, 1000, 2000);
-    int aileron_us  = map(channels[CHANNEL_AILERON], 172, 1811, 1000, 2000);
+    int throttle_us = channels[CHANNEL_THROTTLE];
+    int rudder_us   = channels[CHANNEL_RUDDER];
+    int elevator_us = channels[CHANNEL_ELEVATOR];
+    int aileron_us  = channels[CHANNEL_AILERON];
 
     // Clamp values to safe servo range
     if (throttle_us < SERVO_MIN_US) throttle_us = SERVO_MIN_US;
