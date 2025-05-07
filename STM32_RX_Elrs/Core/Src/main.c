@@ -135,6 +135,10 @@ int main(void)
 
   /* USER CODE END 2 */
 
+  HAL_UART_Receive_DMA(&huart1, uartRxBuf, UART_RX_BUFFER_SIZE);
+  __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
+
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -146,6 +150,8 @@ int main(void)
 	  CrsfSerial_Loop(&hcrsf);
 
 	  onRCFrameReceived(hcrsf.channels);
+
+	  ServoControl_Update(hcrsf.channels);
 
 	  uint32_t currentMillis = HAL_GetTick();
 
