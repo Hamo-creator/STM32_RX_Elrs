@@ -50,10 +50,6 @@ It also includes a **failsafe mechanism** to hold the last known valid RC signal
 - **Prescaler:** `99`
 - **Counter Period:** `19999`
 
-With a 100 MHz system clock, this gives:
-100 MHz / (99 + 1) = 1 MHz timer clock
-PWM period = 20000 ticks → 20 ms (50 Hz)
-1 tick = 1 µs (so pulse width = microseconds)
 
 ### CRSF Input
 
