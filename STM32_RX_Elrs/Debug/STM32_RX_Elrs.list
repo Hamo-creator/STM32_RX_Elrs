@@ -2157,7 +2157,7 @@ void ServoControl_Update(const int *channels) {
 //    int elevator_us = channels[CHANNEL_ELEVATOR];
 //    int aileron_us  = channels[CHANNEL_AILERON];
 
-    int throttle_us = map(channels[CHANNEL_THROTTLE], 172, 1811, 1000, 2000);
+    int throttle_us = map(channels[CHANNEL_THROTTLE], 172, 1811, 1000, 2000); // 450, 1100
  800109c:	687b      	ldr	r3, [r7, #4]
  800109e:	6818      	ldr	r0, [r3, #0]
  80010a0:	f44f 63fa 	mov.w	r3, #2000	@ 0x7d0
@@ -2167,7 +2167,7 @@ void ServoControl_Update(const int *channels) {
  80010ae:	21ac      	movs	r1, #172	@ 0xac
  80010b0:	f7ff ffbc 	bl	800102c <map>
  80010b4:	6178      	str	r0, [r7, #20]
-    int rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);
+    int rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);   // 600, 900
  80010b6:	687b      	ldr	r3, [r7, #4]
  80010b8:	3304      	adds	r3, #4
  80010ba:	6818      	ldr	r0, [r3, #0]

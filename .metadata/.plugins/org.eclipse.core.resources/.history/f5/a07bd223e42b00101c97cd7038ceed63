@@ -25,8 +25,8 @@ void ServoControl_Update(const int *channels) {
 //    int elevator_us = channels[CHANNEL_ELEVATOR];
 //    int aileron_us  = channels[CHANNEL_AILERON];
 
-    int throttle_us = map(channels[CHANNEL_THROTTLE], 172, 1811, 1000, 2000); // 450, 1100
-    int rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);   // 600, 900
+    int throttle_us = map(channels[CHANNEL_THROTTLE], 172, 1811, 1000, 2000);
+    int rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);
     int elevator_us = map(channels[CHANNEL_ELEVATOR], 172, 1811, 1000, 2000);
     int aileron_us  = map(channels[CHANNEL_AILERON], 172, 1811, 1000, 2000);
 
