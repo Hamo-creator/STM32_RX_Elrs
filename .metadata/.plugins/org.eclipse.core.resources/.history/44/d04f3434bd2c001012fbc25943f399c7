@@ -24,8 +24,8 @@ typedef enum {
 
 extern uint8_t rx_dma_byte;  // One byte buffer
 
-#define UART_RX_BUFFER_SIZE 128
-extern uint8_t uartRxBuf[];
+#define UART_RX_BUFFER_SIZE 	128
+extern uint8_t uartRxBuf[UART_RX_BUFFER_SIZE];
 
 typedef struct {
     UART_HandleTypeDef *huart;

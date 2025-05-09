@@ -6,6 +6,7 @@
  */
 
 #include "servo_control.h"
+#include <stdio.h>
 
 int map(int value, int in_min, int in_max, int out_min, int out_max) {
     return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
@@ -31,10 +32,14 @@ void ServoControl_Update(const int *channels, bool failsafeActive) {
         elevator_us = 1500;
         aileron_us  = 1500;
     } else {
-        rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);   // 600, 900
+        rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);
         elevator_us = map(channels[CHANNEL_ELEVATOR], 172, 1811, 1000, 2000);
         aileron_us  = map(channels[CHANNEL_AILERON], 172, 1811, 1000, 2000);
     }
+
+//    int rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);   // 600, 900
+//    int elevator_us = map(channels[CHANNEL_ELEVATOR], 172, 1811, 1000, 2000);
+//    int aileron_us  = map(channels[CHANNEL_AILERON], 172, 1811, 1000, 2000);
 
     // Clamp values to safe servo range
     if (throttle_us < SERVO_MIN_US) throttle_us = SERVO_MIN_US;

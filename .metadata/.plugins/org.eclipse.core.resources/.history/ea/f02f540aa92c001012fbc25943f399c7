@@ -9,11 +9,10 @@
 #define SERVO_CONTROL_H_
 
 #include "tim.h"  // Include HAL timer handles
-#include <stdbool.h>
 
 // Map your RC channel indices to servo roles
-#define CHANNEL_RUDDER    0
-#define CHANNEL_THROTTLE  1
+#define CHANNEL_THROTTLE  0
+#define CHANNEL_RUDDER    1
 #define CHANNEL_ELEVATOR  2
 #define CHANNEL_AILERON   3
 
@@ -25,8 +24,7 @@
 void ServoControl_Init(void);
 
 // Updates all servos with current RC values
-//void ServoControl_Update(const int *channels);
-void ServoControl_Update(const int *channels, bool failsafeActive);
+void ServoControl_Update(const int *channels);
 
 
 #endif /* INC_SERVO_CONTROL_H_ */

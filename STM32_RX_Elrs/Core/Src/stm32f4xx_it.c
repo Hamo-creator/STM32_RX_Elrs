@@ -255,27 +255,5 @@ void DMA2_Stream7_IRQHandler(void)
 
 /* USER CODE BEGIN 1 */
 
-// UART receiver complete callback
-//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-//{
-//    if (huart->Instance == USART1) {
-//        // Copy the received byte into your buffer
-////        if (hcrsf.rxBufPos < sizeof(hcrsf.rxBuf)) {
-////            hcrsf.rxBuf[hcrsf.rxBufPos++] = rx_dma_byte; // <--- Correct
-////        }
-//
-//        hcrsf.lastReceive = HAL_GetTick();
-//        ProcessByte(&hcrsf, rx_dma_byte);
-//
-////        if (CrsfSerial_GetPassthroughMode(&hcrsf)) {
-////            if (hcrsf.onOobData) hcrsf.onOobData(rx_dma_byte);
-////        } else {
-////            ProcessByte(&hcrsf, rx_dma_byte);
-////        }
-//
-//        // Restart DMA again for next byte
-//        HAL_UART_Receive_DMA(huart, &rx_dma_byte, 1);
-//    }
-//}
 
 /* USER CODE END 1 */

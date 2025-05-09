@@ -9,7 +9,6 @@
 #define SERVO_CONTROL_H_
 
 #include "tim.h"  // Include HAL timer handles
-#include <stdbool.h>
 
 // Map your RC channel indices to servo roles
 #define CHANNEL_RUDDER    0

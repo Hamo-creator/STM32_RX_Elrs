@@ -19,22 +19,16 @@ void ServoControl_Init(void) {
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  // Aileron
 }
 
-//void ServoControl_Update(const int *channels) {
-void ServoControl_Update(const int *channels, bool failsafeActive) {
+void ServoControl_Update(const int *channels) {
+//    int throttle_us = channels[CHANNEL_THROTTLE];
+//    int rudder_us   = channels[CHANNEL_RUDDER];
+//    int elevator_us = channels[CHANNEL_ELEVATOR];
+//    int aileron_us  = channels[CHANNEL_AILERON];
 
     int throttle_us = map(channels[CHANNEL_THROTTLE], 172, 1811, 1000, 2000); // 450, 1100
-    int rudder_us, elevator_us, aileron_us;
-
-    if (failsafeActive) {
-        // Failsafe: hold throttle, center others
-        rudder_us   = 1500;
-        elevator_us = 1500;
-        aileron_us  = 1500;
-    } else {
-        rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);   // 600, 900
-        elevator_us = map(channels[CHANNEL_ELEVATOR], 172, 1811, 1000, 2000);
-        aileron_us  = map(channels[CHANNEL_AILERON], 172, 1811, 1000, 2000);
-    }
+    int rudder_us   = map(channels[CHANNEL_RUDDER], 172, 1811, 1000, 2000);   // 600, 900
+    int elevator_us = map(channels[CHANNEL_ELEVATOR], 172, 1811, 1000, 2000);
+    int aileron_us  = map(channels[CHANNEL_AILERON], 172, 1811, 1000, 2000);
 
     // Clamp values to safe servo range
     if (throttle_us < SERVO_MIN_US) throttle_us = SERVO_MIN_US;

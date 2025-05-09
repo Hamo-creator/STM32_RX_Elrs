@@ -20,6 +20,7 @@
 #include "main.h"
 #include "adc.h"
 #include "dma.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -28,6 +29,7 @@
 
 #include "crsf_serial.h"
 #include <stdio.h>
+#include "servo_control.h"
 
 /* USER CODE END Includes */
 
@@ -55,10 +57,10 @@ extern UART_HandleTypeDef huart1;
 // Global CRSF serial instance
 CrsfSerial_HandleTypeDef hcrsf;
 
-uint16_t Buf[64];
-
-//extern UART_RX_BUFFER_SIZE;
-//extern uint8_t uartRxBuf[];
+//uint16_t Buf[64];
+uint32_t lastPacketMillis = 0;
+bool failsafeActive = false;
+int lastValidChannels[CRSF_NUM_CHANNELS];
 
 /* USER CODE END PV */
 
@@ -70,6 +72,21 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// Called when a valid RC packet is received
+void onRCFrameReceived(const int *rcChannels) {
+    lastPacketMillis = HAL_GetTick();  // Timestamp of last valid packet
+    failsafeActive = false;
+
+    // Store last valid RC values
+    for (int i = 0; i < CRSF_NUM_CHANNELS; i++) {
+        lastValidChannels[i] = rcChannels[i];
+    }
+
+    // Update servos here with lastValidChannels
+    ServoControl_Update(lastValidChannels, failsafeActive);
+}
+
 
 /* USER CODE END 0 */
 
@@ -105,7 +122,11 @@ int main(void)
   MX_DMA_Init();
   MX_USART1_UART_Init();
   MX_ADC1_Init();
+  MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+
+  ServoControl_Init();
 
   // Initialize CRSF with UART and baud rate
   CrsfSerial_Init(&hcrsf, &huart1, CRSF_BAUDRATE);
@@ -114,12 +135,8 @@ int main(void)
   /* USER CODE END 2 */
 
   HAL_UART_Receive_DMA(&huart1, uartRxBuf, UART_RX_BUFFER_SIZE);
-  __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);  // Enable IDLE interrupt
+  __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
 
-  // Start UART receive in DMA mode
-//  HAL_UART_Receive_DMA(&huart1, &hcrsf.rxBuf[hcrsf.rxBufPos], CRSF_MAX_PACKET_SIZE);
-
-  HAL_UART_Receive_DMA(&huart1, &rx_dma_byte, 1);
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -130,9 +147,22 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
 	  CrsfSerial_Loop(&hcrsf);
-//	  for(int i = 0; i < 64; i++){
-//		  Buf[i] = hcrsf.rxBuf[i];
-//	  }
+
+	  // This updates lastValidChannels[] and servos
+	  onRCFrameReceived(hcrsf.channels);
+
+//	  ServoControl_Update(hcrsf.channels, failsafeActive);  // Redundant
+
+	  uint32_t currentMillis = HAL_GetTick();
+
+	  if ((currentMillis - lastPacketMillis) > CRSF_PACKET_TIMEOUT_MS) {
+		  if (!failsafeActive) {
+			  failsafeActive = true;
+
+			  // Activate failsafe behavior: hold last known value for throttle, others in the center
+			  ServoControl_Update(lastValidChannels, failsafeActive);
+		  }
+	  }
   }
   /* USER CODE END 3 */
 }

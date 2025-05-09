@@ -57,6 +57,7 @@ void CrsfSerial_Init(CrsfSerial_HandleTypeDef *hcrsf, UART_HandleTypeDef *huart,
 // Usage
 void CrsfSerial_Begin(CrsfSerial_HandleTypeDef *hcrsf, uint32_t baud);
 void CrsfSerial_Loop(CrsfSerial_HandleTypeDef *hcrsf);
+void CrsfSerial_UART_IdleCallback(CrsfSerial_HandleTypeDef *hcrsf);
 void CrsfSerial_WriteByte(CrsfSerial_HandleTypeDef *hcrsf, uint8_t b);
 void CrsfSerial_WriteBuffer(CrsfSerial_HandleTypeDef *hcrsf, const uint8_t *buf, uint16_t len);
 void CrsfSerial_QueuePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t type, const void *payload, uint8_t len);

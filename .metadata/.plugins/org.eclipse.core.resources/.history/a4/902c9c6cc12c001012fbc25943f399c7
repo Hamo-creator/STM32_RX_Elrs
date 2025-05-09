@@ -169,7 +169,7 @@ int main(void)
 
 	    uint32_t now = HAL_GetTick();
 
-	    if (now - lastVoltageRead >= 5000) { // every 2 seconds
+	    if (now - lastVoltageRead >= 2000) { // every 2 seconds
 	        lastVoltageRead = now;
 
 	        voltage = Read_BatteryVoltage();
