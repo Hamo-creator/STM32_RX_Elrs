@@ -119,23 +119,6 @@ void ProcessByte(CrsfSerial_HandleTypeDef *hcrsf, uint8_t b) {
 }
 
 void CrsfSerial_Loop(CrsfSerial_HandleTypeDef *hcrsf) {
-//    uint8_t b;
-//    while (HAL_UART_Receive(hcrsf->huart, &b, 1, 0) == HAL_OK) {
-//        hcrsf->lastReceive = HAL_GetTick();
-//        if (CrsfSerial_GetPassthroughMode(hcrsf)) {
-//            if (hcrsf->onOobData) hcrsf->onOobData(b);
-//        } else {
-//            ProcessByte(hcrsf, b);
-//        }
-//    }
-//    while (HAL_UART_Receive_DMA(hcrsf->huart, &b, 1) == HAL_OK) {
-//        hcrsf->lastReceive = HAL_GetTick();
-//        if (CrsfSerial_GetPassthroughMode(hcrsf)) {
-//            if (hcrsf->onOobData) hcrsf->onOobData(b);
-//        } else {
-//            ProcessByte(hcrsf, b);
-//        }
-//    }
     if (hcrsf->linkIsUp && HAL_GetTick() - hcrsf->lastChannelsPacket > CRSF_FAILSAFE_STAGE1_MS) {
         if (hcrsf->onLinkDown) hcrsf->onLinkDown();
         hcrsf->linkIsUp = false;
