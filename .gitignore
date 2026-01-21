@@ -1,12 +1,40 @@
-.mxproject
-/Drivers
-/Debug
-/.settings
-.project
-/Startup
-*.launch
-*.ioc
-*.ld
-*.lock
+# =========================
+# STM32CubeIDE / Eclipse
+# =========================
+.metadata/
+.settings/
+
+# =========================
+# Build folders
+# =========================
+Debug/
+Release/
+
+# =========================
+# Compiled files
+# =========================
+*.o
+*.d
+*.elf
+*.map
+*.list
+*.su
+*.cyclo
+
+# =========================
+# Logs / temp
+# =========================
 *.log
-*.metadata
+*.tmp
+*.lock
+
+# =========================
+# Archives
+# =========================
+*.zip
+*.rar
+
+# =========================
+# Optional (IDE files)
+# =========================
+*.launch

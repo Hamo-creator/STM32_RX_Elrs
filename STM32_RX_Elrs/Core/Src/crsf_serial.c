@@ -96,7 +96,10 @@ static void HandlePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t len) {
         case CRSF_FRAMETYPE_BATTERY_SENSOR:
             memcpy(&hcrsf->batterySensor, hdr->data, sizeof(crsf_sensor_battery_t));
             if (hcrsf->onPacketBattery) hcrsf->onPacketBattery(&hcrsf->batterySensor);
+<<<<<<< HEAD
             hcrsf->linkIsUp = true;
+=======
+>>>>>>> 363fa39 (telemetry send upload)
             break;
         case CRSF_FRAMETYPE_COMMAND:
             // The transmitter has sent a command. For ELRS, this is often a poll.
@@ -104,6 +107,7 @@ static void HandlePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t len) {
             // The second byte (hdr->data[1]) is the actual command ID.
             // For a simple poll, the packet type 0x28 is all we need.
             // This is typically a telemetry poll from the TX
+<<<<<<< HEAD
 //            if (hcrsf->telemetry_tx_len > 0) {
 //                // Signal main loop to send the queued telemetry
 //            	hcrsf->telemetry_poll_received = true;
@@ -112,6 +116,13 @@ static void HandlePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t len) {
             /* 🔑 RC frame edge for FC */
             telemetry_window_open = true;
             //telemetry_window_deadline = micros() + TELEMETRY_WINDOW_US;
+=======
+            if (hcrsf->telemetry_tx_len > 0) {
+                // Signal main loop to send the queued telemetry
+            	hcrsf->telemetry_poll_received = true;
+          	    HAL_GPIO_TogglePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin);
+            }
+>>>>>>> 363fa39 (telemetry send upload)
             break;
     }
 }

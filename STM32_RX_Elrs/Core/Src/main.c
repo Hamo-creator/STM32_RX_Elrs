@@ -78,11 +78,18 @@ uint16_t ADC_BUF[1];
 uint16_t Buf[64];
 uint32_t lastPacketMillis = 0;
 uint32_t sendTiming;
+<<<<<<< HEAD
 uint32_t now;
 
 //Timing variables for the main loop ---
 uint32_t lastBatterySendTime = 0;
 const uint32_t BATTERY_SEND_INTERVAL_MS = 40; // Send every 1 second
+=======
+
+//Timing variables for the main loop ---
+uint32_t lastBatterySendTime = 0;
+const uint32_t BATTERY_SEND_INTERVAL_MS = 500; // Send every 1 second
+>>>>>>> 363fa39 (telemetry send upload)
 
 #define UART_RX_BUFFER_SIZE 128
 uint8_t  uartRxBuf[UART_RX_BUFFER_SIZE];
@@ -93,12 +100,15 @@ int lastValidChannels[CRSF_NUM_CHANNELS];
 uint8_t telemetry_Channels[64];
 uint8_t telem_queue_status = 6;
 
+<<<<<<< HEAD
 volatile bool telemetry_window_open = false;
 volatile uint32_t telemetry_window_deadline = 0;
 #define TELEMETRY_PERIOD_US   4000   // 4ms
 static uint32_t lastTelemetryUs = 0;
 
 
+=======
+>>>>>>> 363fa39 (telemetry send upload)
 float A_X, A_Y, A_Z, G_X, G_Y, G_Z, TEMPERATUE;
 float Roll, Pitch, Yaw;
 
@@ -219,11 +229,14 @@ static uint8_t sendBatteryTelemetry(float voltage, float current, float capacity
 	// Queue the packet for transmission
 	return CrsfSerial_QueuePacket(&hcrsf, CRSF_FRAMETYPE_BATTERY_SENSOR, &crsfBat, sizeof(crsfBat));
 }
+<<<<<<< HEAD
 
 static inline uint32_t micros(void)
 {
     return DWT->CYCCNT / (HAL_RCC_GetHCLKFreq() / 1000000);
 }
+=======
+>>>>>>> 363fa39 (telemetry send upload)
 
 /* USER CODE END 0 */
 
@@ -284,11 +297,14 @@ int main(void)
   // Strating ADC
   HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ADC_BUF, 1);
 
+<<<<<<< HEAD
   // Enable DWT Cycle Counter
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk; // Enable access to DWT
   DWT->CYCCNT = 0;                                // Reset the counter
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;            // Enable the cycle counter
 
+=======
+>>>>>>> 363fa39 (telemetry send upload)
   status_i2c = mpu_init(&hi2c1);
 
   if (status_i2c == 1) {
@@ -321,6 +337,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+<<<<<<< HEAD
 //	  sendTiming = HAL_GetTick();
 
 	  now = micros();
@@ -383,6 +400,56 @@ int main(void)
 //          sendStatus = sendBatteryTelemetry(batteryVoltage, 3.0, 4.0, 5.0);
 //	  }
 
+=======
+	  sendTiming = HAL_GetTick();
+
+	  CrsfSerial_Loop(&hcrsf);
+
+      // ====================================================================
+      //  PHASE 2: Telemetry Data Queuing
+      // ====================================================================
+
+	  // Check if it's time to send the battery voltage
+	  if ((CrsfSerial_IsLinkUp(&hcrsf)) && (HAL_GetTick() - lastBatterySendTime >= BATTERY_SEND_INTERVAL_MS)) {
+	  //if (!CrsfSerial_IsLinkUp(&hcrsf)) {
+		  lastBatterySendTime = HAL_GetTick(); // Update the timestamp
+		  // Get voltage and queue the packet for sending
+		  // The CrsfSerial_Loop will handle the actual transmission when it can.
+		  batteryVoltage = GetBatteryVoltage(); // e.g., returns 12.6f
+		  millivolts = batteryVoltage * 1000; // Convert to mV
+          voltage_dV = millivolts / 100; // CRSF uses 0.1V units
+
+/*          crsf_sensor_battery_t battery_payload = {0};
+          battery_payload.voltage = voltage_dV;
+          // Other fields (current, capacity, remaining_percent) can be set here if available
+
+          // Queue the battery telemetry packet. It will be sent when polled by the TX.
+          telem_queue_status = Crsf_QueueTelemetryPacket(&crsf_handle_rx, CRSF_FRAMETYPE_BATTERY_SENSOR, (uint8_t*)&battery_payload, sizeof(crsf_sensor_battery_t));
+          for (int i = 0; i < 64; i++){
+        	  telemetry_Channels[i] = hcrsf.telemetry_tx_buffer[i];
+          }*/
+		  // Use the provided function to queue the packet.
+		  // Do not check the return status here in the main loop.
+		  // The library is responsible for managing the transmission.
+//		  sendStatus = sendBatteryVoltage(millivolts);
+          sendStatus = sendBatteryTelemetry(batteryVoltage, 10.0, 45.0, 50);
+	  }
+
+      // ====================================================================
+      //  PHASE 3: Telemetry Response to Polls
+      // ====================================================================
+      // This flag is set by Crsf_ProcessByte when a poll packet is received.
+/*      if (crsf_handle_rx.telemetry_poll_received) {
+          crsf_handle_rx.telemetry_poll_received = false; // Clear the flag
+
+          // Check if there's a telemetry packet queued and the UART is not busy.
+          if (!crsf_handle_rx.tx_busy && crsf_handle_rx.telemetry_tx_len > 0) {
+              // Transmit the queued telemetry packet.
+              Crsf_TransmitPacket(&crsf_handle_rx, crsf_handle_rx.telemetry_tx_buffer, crsf_handle_rx.telemetry_tx_len);
+              crsf_handle_rx.telemetry_tx_len = 0; // Clear the queue after sending
+          }
+      }*/
+>>>>>>> 363fa39 (telemetry send upload)
 //	  if(sendStatus == 0) {
 //		  HAL_GPIO_TogglePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin);
 //	  }
