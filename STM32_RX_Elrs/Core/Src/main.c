@@ -20,6 +20,7 @@
 #include "main.h"
 #include "adc.h"
 #include "dma.h"
+#include "i2c.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -30,6 +31,8 @@
 #include "crsf_serial.h"
 #include <stdio.h>
 #include "servo_control.h"
+#include "mpu9250.h"
+#include "neo6m.h"
 
 /* USER CODE END Includes */
 
@@ -37,11 +40,24 @@
 /* USER CODE BEGIN PTD */
 
 extern UART_HandleTypeDef huart1;
+extern UART_HandleTypeDef huart6;
+extern I2C_HandleTypeDef hi2c1;
 
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+// Voltage monitoring
+#define R1		10000.0f	// Ohm
+#define R2		2200.0f	// Ohm
+#define VREF	3.3f	// Reference voltage of ADC
+#define ADC_MAX_VALUE      4095.0f	// 12-bit ADC
+float batteryVoltage;
+uint16_t millivolts;
+
+uint16_t voltage_dV;
+
+uint8_t sendStatus = 6;
 
 /* USER CODE END PD */
 
@@ -56,11 +72,50 @@ extern UART_HandleTypeDef huart1;
 
 // Global CRSF serial instance
 CrsfSerial_HandleTypeDef hcrsf;
+CrsfSerial_HandleTypeDef crsf_handle_rx;
 
+uint16_t ADC_BUF[1];
 uint16_t Buf[64];
 uint32_t lastPacketMillis = 0;
+uint32_t sendTiming;
+uint32_t now;
+
+//Timing variables for the main loop ---
+uint32_t lastBatterySendTime = 0;
+const uint32_t BATTERY_SEND_INTERVAL_MS = 40; // Send every 1 second
+
+#define UART_RX_BUFFER_SIZE 128
+uint8_t  uartRxBuf[UART_RX_BUFFER_SIZE];
+uint16_t oldPos = 0;
+
 bool failsafeActive = false;
 int lastValidChannels[CRSF_NUM_CHANNELS];
+uint8_t telemetry_Channels[64];
+uint8_t telem_queue_status = 6;
+
+volatile bool telemetry_window_open = false;
+volatile uint32_t telemetry_window_deadline = 0;
+#define TELEMETRY_PERIOD_US   4000   // 4ms
+static uint32_t lastTelemetryUs = 0;
+
+
+float A_X, A_Y, A_Z, G_X, G_Y, G_Z, TEMPERATUE;
+float Roll, Pitch, Yaw;
+
+uint32_t prev_tick = 0;
+uint8_t status_i2c;
+
+// GPS
+#define RX_BUF_SIZE 256
+
+uint8_t rx_dma_buf[RX_BUF_SIZE];
+uint8_t rx_data[RX_BUF_SIZE];
+uint8_t Num_Sats;
+uint8_t Fix;
+uint16_t old_pos = 0;
+float Latitude, Longitude, Altitude, Speed;
+
+NEO6M_Data_t *gps;
 
 /* USER CODE END PV */
 
@@ -85,9 +140,90 @@ void onRCFrameReceived(const int *rcChannels) {
 
     // Update servos here with lastValidChannels
     ServoControl_Update(lastValidChannels);
-//    updateServos(lastValidChannels);
+}
+// This is the function that will be registered as the callback.
+// Its name and signature MUST match the pointer in the struct.
+void onPacketChannelsReceived(void) {
+	// The CRSF library has already updated hcrsf.channels with the new data.
+	// We just need to use it.
+	lastPacketMillis = HAL_GetTick(); failsafeActive = false;
+	// The 'lastValidChannels' buffer might be redundant if you always
+	// read from hcrsf.channels, but it's good practice for failsafe.
+	for (int i = 0; i < CRSF_NUM_CHANNELS; i++) {
+		lastValidChannels[i] = hcrsf.channels[i];
+	}
+	// Update your servos with the fresh data from the handle.
+	ServoControl_Update(hcrsf.channels);
 }
 
+// This function is ONLY called by the CRSF library when the link goes down.
+void onLinkDown() {
+	failsafeActive = true; // Add code here to handle failsafe, e.g., center servos.
+	  // Activate failsafe behavior: hold last known values
+	  ServoControl_Update(lastValidChannels);
+}
+
+// This function packs battery
+/*void onPacketBatterysend(){
+
+}*/
+
+// Clalculating battery voltage
+float GetBatteryVoltage(void) {
+	uint16_t adc_value = ADC_BUF[0];
+	// Convert ADC reading to measured divider voltage
+	float vout = (adc_value * VREF) / ADC_MAX_VALUE;
+
+	// Claculate battery voltage
+	float vbat = vout * ((R1 + R2) / R2);
+
+	return vbat;
+}
+
+// This function should use the library's queue, not transmit directly.
+/*uint8_t sendBatteryVoltage(uint16_t millivolts) {
+    uint16_t voltage_cV = millivolts / 100; // convert to 0.01V units
+
+	uint8_t payload[7] = {0}; // Initialize to zero
+//	// Voltage (Little Endian)
+//	payload[0] = (uint8_t)(millivolts & 0xFF);
+//	payload[1] = (uint8_t)(millivolts >> 8);
+
+    // Voltage (BIG ENDIAN)
+    payload[0] = (voltage_cV >> 8) & 0xFF;
+    payload[1] = voltage_cV & 0xFF;
+
+    // Current (not measured → 0 mA)
+    payload[2] = 0;
+    payload[3] = 0;
+
+    // Fuel used (mAh → 0)
+    payload[4] = 0;
+    payload[5] = 0;
+
+    // Remaining capacity (percent → 0 if unknown)
+    payload[6] = 0;
+
+	// Queue the packet for transmission.
+	return CrsfSerial_QueuePacket(&hcrsf, CRSF_FRAMETYPE_BATTERY_SENSOR, payload, sizeof(payload));
+}*/
+
+static uint8_t sendBatteryTelemetry(float voltage, float current, float capacity, float remaining){
+	crsf_sensor_battery_t crsfBat = {0};
+
+	// Values are MSB first (big Endian)
+	crsfBat.voltage = htobe32((uint32_t)(voltage*10.0));	// Volts
+	crsfBat.current = htobe32((uint32_t)(current*10.0));	// Amps
+	crsfBat.capacity = htobe32((uint32_t)(capacity)) << 8;	//mAh (with this implemetation max capacity is 65535mAh)
+	crsfBat.remaining = (uint32_t)(remaining);				// Percent
+	// Queue the packet for transmission
+	return CrsfSerial_QueuePacket(&hcrsf, CRSF_FRAMETYPE_BATTERY_SENSOR, &crsfBat, sizeof(crsfBat));
+}
+
+static inline uint32_t micros(void)
+{
+    return DWT->CYCCNT / (HAL_RCC_GetHCLKFreq() / 1000000);
+}
 
 /* USER CODE END 0 */
 
@@ -125,19 +261,57 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
+  MX_I2C1_Init();
+  MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
 
   ServoControl_Init();
 
   // Initialize CRSF with UART and baud rate
   CrsfSerial_Init(&hcrsf, &huart1, CRSF_BAUDRATE);
-  CrsfSerial_Begin(&hcrsf, CRSF_BAUDRATE);
+  // *** REGISTER THE CALLBACKS ***
+  //hcrsf.onRCFrameReceived = onRCFrameReceived;
+  hcrsf.onPacketChannels = onPacketChannelsReceived;
+//  hcrsf.onPacketBattery = onPacketBatterysend;
+  hcrsf.onLinkDown = onLinkDown;
 
-  /* USER CODE END 2 */
+  //CrsfSerial_Begin(&hcrsf, CRSF_BAUDRATE);
 
   HAL_UART_Receive_DMA(&huart1, uartRxBuf, UART_RX_BUFFER_SIZE);
+
   __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
 
+  // Strating ADC
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ADC_BUF, 1);
+
+  // Enable DWT Cycle Counter
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk; // Enable access to DWT
+  DWT->CYCCNT = 0;                                // Reset the counter
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;            // Enable the cycle counter
+
+  status_i2c = mpu_init(&hi2c1);
+
+  if (status_i2c == 1) {
+	  HAL_GPIO_TogglePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin);
+	  HAL_Delay(250);
+	  HAL_GPIO_TogglePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin);
+	  HAL_Delay(500);
+	  HAL_GPIO_TogglePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin);
+	  HAL_Delay(250);
+	  HAL_GPIO_TogglePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin);
+
+	  MPU_calibrateGyro(&hi2c1, 1500);
+  } else {
+	  HAL_GPIO_WritePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin, GPIO_PIN_SET);
+  }
+
+//  NEO6M_Init(&huart6);
+
+  // Start UART DMA reception in circular mode for NEO
+//  HAL_UART_Receive_DMA(&huart6, rx_dma_buf, RX_BUF_SIZE);
+//  __HAL_UART_ENABLE_IT(&huart6, UART_IT_IDLE);
+
+  /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -147,23 +321,90 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+//	  sendTiming = HAL_GetTick();
+
+	  now = micros();
+
 	  CrsfSerial_Loop(&hcrsf);
 
-	  onRCFrameReceived(hcrsf.channels);
+/*	if (telemetry_window_open &&
+		(int32_t)(now - telemetry_window_deadline) >= 0)
+	{
+		telemetry_window_open = false;
+	}*/
+    /* Telemetry conditions:
+       - RX recently spoke (window open)
+       - link is up
+       - UART idle
+       - 4ms elapsed
+    */
+    if (telemetry_window_open &&
+        hcrsf.linkIsUp &&
+        (int32_t)(now - lastTelemetryUs) >= TELEMETRY_PERIOD_US)
+    {
+        lastTelemetryUs += TELEMETRY_PERIOD_US;
 
-	  ServoControl_Update(hcrsf.channels);
+		batteryVoltage = GetBatteryVoltage(); // e.g., returns 12.6f
+		millivolts = batteryVoltage * 1000; // Convert to mV
+        voltage_dV = millivolts / 100; // CRSF uses 0.1V units
+        sendStatus = sendBatteryTelemetry(
+        		batteryVoltage,
+            0.0f, 0.0f, 0.0f
+        );
+        telemetry_window_open = false;
+    }
 
-	  uint32_t currentMillis = HAL_GetTick();
+      // ====================================================================
+      //  PHASE 2: Telemetry Data Queuing
+      // ====================================================================
 
-	  if ((currentMillis - lastPacketMillis) > CRSF_PACKET_TIMEOUT_MS) {
-		  if (!failsafeActive) {
-			  failsafeActive = true;
+	  // Check if it's time to send the battery voltage
+/*	  if ((int32_t)(sendTiming - lastBatterySendTime) >= BATTERY_SEND_INTERVAL_MS){
+		  lastBatterySendTime += BATTERY_SEND_INTERVAL_MS;
+		  if (CrsfSerial_IsLinkUp(&hcrsf)) {
+			  // Get voltage and queue the packet for sending
+			  // The CrsfSerial_Loop will handle the actual transmission when it can.
+			  batteryVoltage = GetBatteryVoltage(); // e.g., returns 12.6f
+			  millivolts = batteryVoltage * 1000; // Convert to mV
+	          voltage_dV = millivolts / 100; // CRSF uses 0.1V units
 
-			  // Activate failsafe behavior: hold last known values
-			  ServoControl_Update(lastValidChannels);
-//			  updateServos(lastValidChannels);
+	          sendStatus = sendBatteryTelemetry(batteryVoltage, 3.0, 4.0, 5.0);
 		  }
-	  }
+	  }*/
+//	  if ((CrsfSerial_IsLinkUp(&hcrsf)) && (HAL_GetTick() - lastBatterySendTime >= BATTERY_SEND_INTERVAL_MS)) {
+//	  //if (!CrsfSerial_IsLinkUp(&hcrsf)) {
+//		  lastBatterySendTime = HAL_GetTick(); // Update the timestamp
+//		  // Get voltage and queue the packet for sending
+//		  // The CrsfSerial_Loop will handle the actual transmission when it can.
+//		  batteryVoltage = GetBatteryVoltage(); // e.g., returns 12.6f
+//		  millivolts = batteryVoltage * 1000; // Convert to mV
+//          voltage_dV = millivolts / 100; // CRSF uses 0.1V units
+//
+//          sendStatus = sendBatteryTelemetry(batteryVoltage, 3.0, 4.0, 5.0);
+//	  }
+
+//	  if(sendStatus == 0) {
+//		  HAL_GPIO_TogglePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin);
+//	  }
+
+	  MPU_calcAttitude(&hi2c1);
+
+	  Roll = attitude.r;
+	  Pitch = attitude.p;
+	  Yaw = attitude.y;
+
+//	  gps = NEO6M_GetData();
+//	  if (gps->fix)
+//	  {
+//		  Fix = gps->fix;
+//		  Latitude = gps->latitude;
+//		  Longitude = gps->longitude;
+//		  Altitude = gps->altitude;
+//		  Speed = gps->speed;
+//		  Num_Sats = gps->num_sats;
+//	  }
+
+
   }
   /* USER CODE END 3 */
 }
