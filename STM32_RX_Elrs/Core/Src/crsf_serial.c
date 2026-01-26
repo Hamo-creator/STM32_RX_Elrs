@@ -1,8 +1,23 @@
-#include "crsf_serial.h"
-#include <string.h>
+/*
+ * crsf.c
+ *
+ *  Created on: Apr 5, 2025
+ *      Author: Khalil
+ */
 
-uint8_t uartRxBuf[UART_RX_BUFFER_SIZE];
-uint16_t oldPos = 0;
+#include "crsf.h"
+#include "main.h"  // for UART handle
+
+
+volatile uint8_t crsf_tx_busy = 0;
+volatile uint32_t telemetry_count = 0;
+
+extern uint16_t oldPos;
+extern uint8_t  uartRxBuf[];
+
+// Replace with your actual UART handle
+extern UART_HandleTypeDef huart1;
+extern CrsfSerial_HandleTypeDef hcrsf;
 
 // crc implementation from CRSF protocol document rev7
 
@@ -41,7 +56,10 @@ static uint8_t crsf_crc8tab[256] = {
     0x84, 0x51, 0xFB, 0x2E, 0x7A, 0xAF, 0x05, 0xD0, 0xAD, 0x78, 0xD2, 0x07, 0x53, 0x86, 0x2C, 0xF9
 };
 
-static uint8_t crsf_crc8(const uint8_t *ptr, uint8_t len) {
+
+// === CRC8 Calculation ===
+//static uint8_t crsf_crc8(const uint8_t *ptr, uint8_t len) {
+uint8_t crsf_crc8(const uint8_t *ptr, uint8_t len) {
     uint8_t crc = 0;
     for (uint8_t i = 0; i < len; i++) {
         crc = crsf_crc8tab[crc ^ *ptr++];
@@ -49,29 +67,97 @@ static uint8_t crsf_crc8(const uint8_t *ptr, uint8_t len) {
     return crc;
 }
 
-void CrsfSerial_Init(CrsfSerial_HandleTypeDef *hcrsf, UART_HandleTypeDef *huart, uint32_t baud) {
-    hcrsf->huart = huart;
-    hcrsf->baud = baud;
-    hcrsf->rxBufPos = 0;
-    hcrsf->lastReceive = 0;
-    hcrsf->lastChannelsPacket = 0;
-    hcrsf->linkIsUp = false;
-    hcrsf->passthroughBaud = 0;
-
-    memset(hcrsf->rxBuf, 0, sizeof(hcrsf->rxBuf));
-    memset(hcrsf->channels, 0, sizeof(hcrsf->channels));
-
-    hcrsf->onLinkDown = NULL;
-    hcrsf->onLinkUp = NULL;
-    hcrsf->onOobData = NULL;
-    hcrsf->onPacketChannels = NULL;
-    hcrsf->onPacketLinkStatistics = NULL;
-    hcrsf->onPacketGps = NULL;
+uint8_t crc8_dvb_s2(const uint8_t *data, uint8_t len)
+{
+    uint8_t crc = 0;
+    for (uint8_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++)
+            crc = (crc & 0x80) ? (crc << 1) ^ 0xD5 : (crc << 1);
+    }
+    return crc;
 }
 
-void CrsfSerial_Begin(CrsfSerial_HandleTypeDef *hcrsf, uint32_t baud) {
-    hcrsf->baud = baud ? baud : hcrsf->baud;
-    // HAL_UART_Init must be called elsewhere with correct parameters
+void CRSF_SetRxMode(void)
+{
+    HAL_GPIO_WritePin(TX_RX_EN_GPIO_Port, TX_RX_EN_Pin, GPIO_PIN_SET);   // Enable receiver
+    hcrsf.rx_busy = true;
+}
+
+void CRSF_SetTxMode(void)
+{
+    HAL_GPIO_WritePin(TX_RX_EN_GPIO_Port, TX_RX_EN_Pin, GPIO_PIN_RESET); // Disable receiver → TX active
+    //hcrsf.rx_busy = false;
+}
+
+// === Packet Preparation: Channels ===
+void CRSF_PrepareDataPacket(uint8_t packet[], int16_t channels[]) {
+    packet[0] = ELRS_ADDRESS;
+    packet[1] = 24;
+    packet[2] = TYPE_CHANNELS;
+
+    packet[3]  = (uint8_t)(channels[0] & 0x07FF);
+    packet[4]  = (uint8_t)((channels[0] >> 8) | (channels[1] << 3));
+    packet[5]  = (uint8_t)((channels[1] >> 5) | (channels[2] << 6));
+    packet[6]  = (uint8_t)((channels[2] >> 2));
+    packet[7]  = (uint8_t)((channels[2] >> 10) | (channels[3] << 1));
+    packet[8]  = (uint8_t)((channels[3] >> 7) | (channels[4] << 4));
+    packet[9]  = (uint8_t)((channels[4] >> 4) | (channels[5] << 7));
+    packet[10] = (uint8_t)((channels[5] >> 1));
+    packet[11] = (uint8_t)((channels[5] >> 9) | (channels[6] << 2));
+    packet[12] = (uint8_t)((channels[6] >> 6) | (channels[7] << 5));
+    packet[13] = (uint8_t)((channels[7] >> 3));
+    packet[14] = (uint8_t)(channels[8]);
+    packet[15] = (uint8_t)((channels[8] >> 8) | (channels[9] << 3));
+    packet[16] = (uint8_t)((channels[9] >> 5) | (channels[10] << 6));
+    packet[17] = (uint8_t)((channels[10] >> 2));
+    packet[18] = (uint8_t)((channels[10] >> 10) | (channels[11] << 1));
+    packet[19] = (uint8_t)((channels[11] >> 7) | (channels[12] << 4));
+    packet[20] = (uint8_t)((channels[12] >> 4) | (channels[13] << 7));
+    packet[21] = (uint8_t)((channels[13] >> 1));
+    packet[22] = (uint8_t)((channels[13] >> 9) | (channels[14] << 2));
+    packet[23] = (uint8_t)((channels[14] >> 6) | (channels[15] << 5));
+    packet[24] = (uint8_t)((channels[15] >> 3));
+
+    packet[25] = crsf_crc8(&packet[2], packet[1] - 1);
+}
+
+// === Packet Preparation: Command ===
+void CRSF_PrepareCmdPacket(uint8_t packetCmd[], uint8_t command, uint8_t value) {
+    packetCmd[0] = ELRS_ADDRESS;
+    packetCmd[1] = 6;
+    packetCmd[2] = TYPE_SETTINGS_WRITE;
+    packetCmd[3] = ELRS_ADDRESS;
+    packetCmd[4] = ADDR_RADIO;
+    packetCmd[5] = command;
+    packetCmd[6] = value;
+    packetCmd[7] = crsf_crc8(&packetCmd[2], packetCmd[1] - 1);
+}
+
+
+// === UART Transmission ===
+uint8_t CRSF_WritePacket(uint8_t packet[], uint8_t packetLength)
+{
+    // 1. Check if the UART is already busy.
+    if (crsf_tx_busy) {
+        return HAL_BUSY;
+    }
+
+    CRSF_SetTxMode();
+
+	hcrsf.rx_busy = false;
+
+    hcrsf.tx_busy = true;
+
+    hcrsf.idlecallback = false;
+
+    // Clear TC flag before starting transmission to prevent immediate interrupt
+    //__HAL_UART_CLEAR_FLAG(hcrsf->huart, UART_FLAG_TC);
+
+    // Enable TC interrupt to know when transmission is truly complete
+    //__HAL_UART_ENABLE_IT(hcrsf->huart, UART_IT_TC);
+    // 6. Start the DMA transfer.
+    return HAL_UART_Transmit_DMA(&huart1, packet, packetLength);
 }
 
 static void ShiftBuffer(CrsfSerial_HandleTypeDef *hcrsf, uint8_t cnt) {
@@ -83,72 +169,12 @@ static void ShiftBuffer(CrsfSerial_HandleTypeDef *hcrsf, uint8_t cnt) {
     hcrsf->rxBufPos -= cnt;
 }
 
-//static void CrsfSerial_UnpackChannels(CrsfSerial_HandleTypeDef *hcrsf, const uint8_t *payload) {
-//    uint32_t bits = 0;
-//    uint8_t bitsAvailable = 0;
-//    uint8_t ch = 0;
-//
-//    for (int i = 0; i < 22; i++) { // 22 bytes for 16 channels
-//        bits |= ((uint32_t)payload[i]) << bitsAvailable;
-//        bitsAvailable += 8;
-//
-//        while (bitsAvailable >= 11 && ch < CRSF_NUM_CHANNELS) {
-//            hcrsf->channels[ch++] = bits & 0x7FF; // extract 11 bits
-//            bits >>= 11;
-//            bitsAvailable -= 11;
-//        }
-//    }
-//}
-
-static void CrsfSerial_UnpackChannels(CrsfSerial_HandleTypeDef *hcrsf, const uint8_t *payload) {
-    uint16_t temp[CRSF_NUM_CHANNELS] = {0};
-    temp[0]  = ((payload[0]  >> 0) | (payload[1] << 8)) & 0x07FF;
-    temp[1]  = ((payload[1]  >> 3) | (payload[2] << 5)) & 0x07FF;
-    temp[2]  = ((payload[2]  >> 6) | (payload[3] << 2) | (payload[4] << 10)) & 0x07FF;
-    temp[3]  = ((payload[4]  >> 1) | (payload[5] << 7)) & 0x07FF;
-    temp[4]  = ((payload[5]  >> 4) | (payload[6] << 4)) & 0x07FF;
-    temp[5]  = ((payload[6]  >> 7) | (payload[7] << 1) | (payload[8] << 9)) & 0x07FF;
-    temp[6]  = ((payload[8]  >> 2) | (payload[9] << 6)) & 0x07FF;
-    temp[7]  = ((payload[9]  >> 5) | (payload[10] << 3)) & 0x07FF;
-    temp[8]  = ((payload[11] >> 0) | (payload[12] << 8)) & 0x07FF;
-    temp[9]  = ((payload[12] >> 3) | (payload[13] << 5)) & 0x07FF;
-    temp[10] = ((payload[13] >> 6) | (payload[14] << 2) | (payload[15] << 10)) & 0x07FF;
-    temp[11] = ((payload[15] >> 1) | (payload[16] << 7)) & 0x07FF;
-    temp[12] = ((payload[16] >> 4) | (payload[17] << 4)) & 0x07FF;
-    temp[13] = ((payload[17] >> 7) | (payload[18] << 1) | (payload[19] << 9)) & 0x07FF;
-    temp[14] = ((payload[19] >> 2) | (payload[20] << 6)) & 0x07FF;
-    temp[15] = ((payload[20] >> 5) | (payload[21] << 3)) & 0x07FF;
-
-    for (int i = 0; i < CRSF_NUM_CHANNELS; i++) {
-        hcrsf->channels[i] = temp[i];
-    }
-}
-
-
-
-static void HandlePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t len) {
-    crsf_header_t *hdr = (crsf_header_t *)hcrsf->rxBuf;
-    switch (hdr->type) {
-        case CRSF_FRAMETYPE_RC_CHANNELS_PACKED:
-            CrsfSerial_UnpackChannels(hcrsf, hdr->data); // <--- UNPACK channels into hcrsf->channels
-            if (hcrsf->onPacketChannels) hcrsf->onPacketChannels();
-            hcrsf->lastChannelsPacket = HAL_GetTick();
-            hcrsf->linkIsUp = true;
-            break;
-        case CRSF_FRAMETYPE_LINK_STATISTICS:
-            memcpy(&hcrsf->linkStatistics, hdr->data, sizeof(crsfLinkStatistics_t));
-            if (hcrsf->onPacketLinkStatistics) hcrsf->onPacketLinkStatistics(&hcrsf->linkStatistics);
-            break;
-        case CRSF_FRAMETYPE_GPS:
-            memcpy(&hcrsf->gpsSensor, hdr->data, sizeof(crsf_sensor_gps_t));
-            if (hcrsf->onPacketGps) hcrsf->onPacketGps(&hcrsf->gpsSensor);
-            break;
-    }
-}
-
-//static void ProcessByte(CrsfSerial_HandleTypeDef *hcrsf, uint8_t b) {
 void ProcessByte(CrsfSerial_HandleTypeDef *hcrsf, uint8_t b) {
-    hcrsf->rxBuf[hcrsf->rxBufPos++] = b;
+    if (hcrsf->rxBufPos >= sizeof(hcrsf->rxBuf)) {
+        hcrsf->rxBufPos = 0; // reset on overflow
+    }
+
+	hcrsf->rxBuf[hcrsf->rxBufPos++] = b;
     if (hcrsf->rxBufPos >= 2) {
         uint8_t len = hcrsf->rxBuf[1];
         if (len >= 3 && hcrsf->rxBufPos >= len + 2) {
@@ -156,24 +182,90 @@ void ProcessByte(CrsfSerial_HandleTypeDef *hcrsf, uint8_t b) {
             if (crc == hcrsf->rxBuf[len + 1]) {
                 HandlePacket(hcrsf, len);
                 ShiftBuffer(hcrsf, len + 2);
-            } else {
+            } else {	// CRC mismatch, discard this packet
                 ShiftBuffer(hcrsf, 1);
             }
+            ShiftBuffer(hcrsf, len + 2); // Shift buffer past the processed/discarded packet
+        } else if (len > CRSF_MAX_PACKET_SIZE) {
+            // Packet too long, discard
+        	ShiftBuffer(hcrsf, 1); // Discard first byte and try again
         }
+    }
+}
+
+// This is where you handle telemetry frames from the RadioMaster TX
+void HandlePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t len)
+{
+	telemetry_count++;
+    uint8_t type = hcrsf->rxBuf[2];  // Frame type byte
+
+    switch (type) {
+    case CRSF_FRAMETYPE_BATTERY_SENSOR:	//BATTERY Telemetry
+        {
+            // Example payload: voltage in deciV, current in 10mA units
+            hcrsf->telemetry_channels[3] = (hcrsf->rxBuf[3] << 8) | hcrsf->rxBuf[4];
+            hcrsf->telemetry_channels[4] = (hcrsf->rxBuf[5] << 8) | hcrsf->rxBuf[6];
+            //uint16_t voltage = (hcrsf->rxBuf[3] << 8) | hcrsf->rxBuf[4];
+            //uint16_t current = (hcrsf->rxBuf[5] << 8) | hcrsf->rxBuf[6];
+            // Store or print it
+            //printf("Telemetry: Battery %u dV, %u cA\r\n", voltage, current);
+        }
+        break;
+
+    case CRSF_FRAMETYPE_LINK_STATISTICS: // LINK_STATISTICS
+        {
+            uint8_t uplink_rssi1 = hcrsf->rxBuf[3];
+            uint8_t uplink_rssi2 = hcrsf->rxBuf[4];
+            uint8_t uplink_snr   = hcrsf->rxBuf[5];
+            printf("Link: RSSI1=%u, RSSI2=%u, SNR=%d\r\n",
+                   uplink_rssi1, uplink_rssi2, (int8_t)uplink_snr);
+        }
+        break;
+
+    case CRSF_FRAMETYPE_ATTITUDE: // ATTITUDE
+        {
+            int16_t pitch = (hcrsf->rxBuf[3] << 8) | hcrsf->rxBuf[4];
+            int16_t roll  = (hcrsf->rxBuf[5] << 8) | hcrsf->rxBuf[6];
+            int16_t yaw   = (hcrsf->rxBuf[7] << 8) | hcrsf->rxBuf[8];
+            printf("Attitude: P=%d, R=%d, Y=%d\r\n", pitch, roll, yaw);
+        }
+        break;
+
+    default:
+        // Unknown / unhandled frame type
+        break;
     }
 }
 
 void CrsfSerial_Loop(CrsfSerial_HandleTypeDef *hcrsf) {
     if (hcrsf->linkIsUp && HAL_GetTick() - hcrsf->lastChannelsPacket > CRSF_FAILSAFE_STAGE1_MS) {
-        if (hcrsf->onLinkDown) hcrsf->onLinkDown();
+        if (hcrsf->onLinkDown){
+        	hcrsf->onLinkDown();
+        }
         hcrsf->linkIsUp = false;
     }
+}
+
+HAL_StatusTypeDef Crsf_SendTelemetryPoll(CrsfSerial_HandleTypeDef *hcrsf) {
+    uint8_t packet[4]; // Address + Length + Type + CRC
+    uint8_t payload_len = 0; // No payload for a poll
+    uint8_t total_len = payload_len + 2; // Type + Payload + CRC
+
+    packet[0] = ADDR_FC; // Destination address (FC)
+    packet[1] = total_len;
+    packet[2] = CRSF_FRAMETYPE_CMD; // Poll command
+    packet[total_len + 1] = crc8_dvb_s2(&packet[2], payload_len + 1);
+
+    return CRSF_WritePacket(packet, total_len + 2);
+    //return Crsf_TransmitPacket(hcrsf, packet, total_len + 2);
 }
 
 void CrsfSerial_UART_IdleCallback(CrsfSerial_HandleTypeDef *hcrsf)
 {
     uint16_t dmaPos = UART_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(hcrsf->huart->hdmarx);
     uint16_t len;
+
+    hcrsf->idlecallback = true;
 
     if (dmaPos != oldPos) {
         if (dmaPos > oldPos) {
@@ -196,67 +288,42 @@ void CrsfSerial_UART_IdleCallback(CrsfSerial_HandleTypeDef *hcrsf)
     }
 }
 
-void CRSF_PrepareTelemetryPacket(uint8_t *packet, uint8_t type, const uint8_t *payload, uint8_t payload_len) {
-    packet[0] = ELRS_ADDRESS;               // Receiver address (0xC8)
-    packet[1] = payload_len + 2;            // Length = type + payload + CRC
-    packet[2] = type;                       // Frame type (GPS, link stats, custom telemetry, etc.)
-    memcpy(&packet[3], payload, payload_len);
-    packet[3 + payload_len] = crsf_crc8(&packet[2], payload_len + 1); // CRC over type + payload
+// This is called when the DMA has received data (IDLE line detected)
+/*void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {//CrsfSerial_HandleTypeDef hcrsf;
+    // Assuming a single CRSF handle for simplicity, adapt for multiple if needed
+   // extern CrsfHandle_t crsf_handle_tx; // For TX side
+
+    //if (huart->Instance == crsf_handle_tx.huart->Instance) {
+    if (huart->Instance == USART1) {
+        // This is the TX side receiving telemetry from FC
+//    	hcrsf.rx_busy = false;
+        // Process bytes from the DMA buffer
+        for (uint16_t i = 0; i < Size; i++) {
+        	ProcessByte(&hcrsf, huart->pRxBuffPtr[i]);
+        }
+        // Re-arm DMA reception
+        HAL_UARTEx_ReceiveToIdle_DMA(huart, huart->pRxBuffPtr, hcrsf.rxBufPos);
+
+        //CRSF_SetTxMode();
+    }
+}*/
+
+// This is called when the UART transmission is truly complete (TC flag set)
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+    //extern CrsfHandle_t crsf_handle_tx; // For TX side
+
+    if (huart->Instance == USART1) {
+        // TX side: Transmission complete, switch back to RX mode
+    	CRSF_SetRxMode();
+    	hcrsf.tx_busy = false;
+    	//hcrsf.rx_busy = false;
+        // You need to implement CRSF_SetRxMode() in your main application code
+    }
+    // Disable TC interrupt after handling
+    //__HAL_UART_DISABLE_IT(huart, UART_IT_TC);
 }
 
-void CrsfSerial_WriteByte(CrsfSerial_HandleTypeDef *hcrsf, uint8_t b) {
-	HAL_UART_Transmit_DMA(hcrsf->huart, &b, 1);
-}
+// --- External Global Variables (for debugging) ---
+volatile uint8_t g_last_crsf_packet_type = 0;
 
-void CrsfSerial_WriteBuffer(CrsfSerial_HandleTypeDef *hcrsf, const uint8_t *buf, uint16_t len) {
-	HAL_UART_Transmit_DMA(hcrsf->huart, (uint8_t *)buf, len);
-}
-
-void CrsfSerial_QueuePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t type, const void *payload, uint8_t len) {
-    if (len > CRSF_MAX_PAYLOAD_LEN) return;
-    uint8_t buf[CRSF_MAX_PACKET_SIZE];
-    buf[0] = CRSF_SYNC_BYTE;
-    buf[1] = len + 2;
-    buf[2] = type;
-    memcpy(&buf[3], payload, len);
-    buf[len + 3] = crc8_dvb_s2(&buf[2], len + 1);
-    CrsfSerial_WriteBuffer(hcrsf, buf, len + 4);
-}
-
-void CrsfSerial_QueuePacketChannels(CrsfSerial_HandleTypeDef *hcrsf) {
-    uint8_t buf[22]; // 11 channels * 11 bits = 242 bits = 30.25 bytes ~ 22 packed bytes
-    // TODO: Pack the channel values here properly
-    memset(buf, 0, sizeof(buf));
-    CrsfSerial_QueuePacket(hcrsf, CRSF_FRAMETYPE_RC_CHANNELS_PACKED, buf, sizeof(buf));
-}
-
-int CrsfSerial_GetChannel(CrsfSerial_HandleTypeDef *hcrsf, unsigned int ch) {
-    return ch < CRSF_NUM_CHANNELS ? hcrsf->channels[ch] : 0;
-}
-
-void CrsfSerial_SetChannel(CrsfSerial_HandleTypeDef *hcrsf, unsigned int ch, unsigned int value_us) {
-    if (ch < CRSF_NUM_CHANNELS)
-        hcrsf->channels[ch] = value_us;
-}
-
-const crsfLinkStatistics_t *CrsfSerial_GetLinkStatistics(CrsfSerial_HandleTypeDef *hcrsf) {
-    return &hcrsf->linkStatistics;
-}
-
-const crsf_sensor_gps_t *CrsfSerial_GetGpsSensor(CrsfSerial_HandleTypeDef *hcrsf) {
-    return &hcrsf->gpsSensor;
-}
-
-bool CrsfSerial_IsLinkUp(CrsfSerial_HandleTypeDef *hcrsf) {
-    return hcrsf->linkIsUp;
-}
-
-bool CrsfSerial_GetPassthroughMode(CrsfSerial_HandleTypeDef *hcrsf) {
-    return hcrsf->passthroughBaud != 0;
-}
-
-void CrsfSerial_SetPassthroughMode(CrsfSerial_HandleTypeDef *hcrsf, bool val, uint32_t passthroughBaud) {
-    if (val) hcrsf->passthroughBaud = passthroughBaud ? passthroughBaud : hcrsf->baud;
-    else hcrsf->passthroughBaud = 0;
-}
 
