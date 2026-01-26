@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 
 #include "crsf_serial.h"
+#include "neo6m.h"
 
 /* USER CODE END Includes */
 
@@ -46,6 +47,13 @@
 /* USER CODE BEGIN PV */
 
 uint8_t rx_dma_byte;  // One byte buffer
+// GPS
+#define RX_BUF_SIZE 256
+
+extern uint8_t rx_dma_buf[RX_BUF_SIZE];
+extern uint8_t rx_data[RX_BUF_SIZE];
+extern uint16_t old_pos;
+extern volatile uint8_t crsf_tx_busy;
 
 /* USER CODE END PV */
 
@@ -60,9 +68,13 @@ uint8_t rx_dma_byte;  // One byte buffer
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
+extern DMA_HandleTypeDef hdma_adc1;
+extern ADC_HandleTypeDef hadc1;
 extern DMA_HandleTypeDef hdma_usart1_rx;
 extern DMA_HandleTypeDef hdma_usart1_tx;
+extern DMA_HandleTypeDef hdma_usart6_rx;
 extern UART_HandleTypeDef huart1;
+extern UART_HandleTypeDef huart6;
 extern CrsfSerial_HandleTypeDef hcrsf;
 /* USER CODE BEGIN EV */
 
@@ -207,6 +219,20 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles ADC1 global interrupt.
+  */
+void ADC_IRQHandler(void)
+{
+  /* USER CODE BEGIN ADC_IRQn 0 */
+
+  /* USER CODE END ADC_IRQn 0 */
+  HAL_ADC_IRQHandler(&hadc1);
+  /* USER CODE BEGIN ADC_IRQn 1 */
+
+  /* USER CODE END ADC_IRQn 1 */
+}
+
+/**
   * @brief This function handles USART1 global interrupt.
   */
 void USART1_IRQHandler(void)
@@ -216,13 +242,40 @@ void USART1_IRQHandler(void)
   /* USER CODE END USART1_IRQn 0 */
   HAL_UART_IRQHandler(&huart1);
   /* USER CODE BEGIN USART1_IRQn 1 */
-
   if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_IDLE)) {
       __HAL_UART_CLEAR_IDLEFLAG(&huart1);
       CrsfSerial_UART_IdleCallback(&hcrsf);
   }
 
   /* USER CODE END USART1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA2 stream0 global interrupt.
+  */
+void DMA2_Stream0_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream0_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream0_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_adc1);
+  /* USER CODE BEGIN DMA2_Stream0_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream0_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA2 stream1 global interrupt.
+  */
+void DMA2_Stream1_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream1_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream1_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_usart6_rx);
+  /* USER CODE BEGIN DMA2_Stream1_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream1_IRQn 1 */
 }
 
 /**
@@ -250,32 +303,44 @@ void DMA2_Stream7_IRQHandler(void)
   HAL_DMA_IRQHandler(&hdma_usart1_tx);
   /* USER CODE BEGIN DMA2_Stream7_IRQn 1 */
 
+  //extern void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart);
+  //HAL_UART_TxCpltCallback(&huart1);
+
   /* USER CODE END DMA2_Stream7_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USART6 global interrupt.
+  */
+void USART6_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART6_IRQn 0 */
+
+  /* USER CODE END USART6_IRQn 0 */
+  HAL_UART_IRQHandler(&huart6);
+  /* USER CODE BEGIN USART6_IRQn 1 */
+  if (__HAL_UART_GET_FLAG(&huart6, UART_FLAG_IDLE))
+  {
+    __HAL_UART_CLEAR_IDLEFLAG(&huart6);
+
+    uint16_t pos = RX_BUF_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart6_rx);
+    uint16_t new_len = (pos >= old_pos) ? (pos - old_pos) : (RX_BUF_SIZE - old_pos + pos);
+
+    // copy new bytes to linear buffer
+    for (uint16_t i = 0; i < new_len; i++)
+      rx_data[i] = rx_dma_buf[(old_pos + i) % RX_BUF_SIZE];
+
+    old_pos = pos;
+
+    NEO6M_Process(rx_data, new_len);
+  }
+
+  HAL_UART_IRQHandler(&huart6);
+
+  /* USER CODE END USART6_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */
 
-// UART receiver complete callback
-//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-//{
-//    if (huart->Instance == USART1) {
-//        // Copy the received byte into your buffer
-////        if (hcrsf.rxBufPos < sizeof(hcrsf.rxBuf)) {
-////            hcrsf.rxBuf[hcrsf.rxBufPos++] = rx_dma_byte; // <--- Correct
-////        }
-//
-//        hcrsf.lastReceive = HAL_GetTick();
-//        ProcessByte(&hcrsf, rx_dma_byte);
-//
-////        if (CrsfSerial_GetPassthroughMode(&hcrsf)) {
-////            if (hcrsf.onOobData) hcrsf.onOobData(rx_dma_byte);
-////        } else {
-////            ProcessByte(&hcrsf, rx_dma_byte);
-////        }
-//
-//        // Restart DMA again for next byte
-//        HAL_UART_Receive_DMA(huart, &rx_dma_byte, 1);
-//    }
-//}
 
 /* USER CODE END 1 */
