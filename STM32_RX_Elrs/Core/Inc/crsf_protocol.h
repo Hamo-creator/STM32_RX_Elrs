@@ -31,6 +31,7 @@
 #define CRSF_BITS_PER_CHANNEL   	11
 
 #define CRSF_SYNC_BYTE 0XC8
+#define RADIO_ADDRESS  0xEA
 
 enum {
     CRSF_FRAME_LENGTH_ADDRESS = 1, // length of ADDRESS field
@@ -66,7 +67,7 @@ typedef enum
     CRSF_FRAMETYPE_PARAMETER_SETTINGS_ENTRY = 0x2B,
     CRSF_FRAMETYPE_PARAMETER_READ = 0x2C,
     CRSF_FRAMETYPE_PARAMETER_WRITE = 0x2D,
-    CRSF_FRAMETYPE_COMMAND = 0x32,
+    CRSF_FRAMETYPE_COMMAND = 0x32,	//0x28
     // MSP commands
     CRSF_FRAMETYPE_MSP_REQ = 0x7A,   // response request using msp sequence as command
     CRSF_FRAMETYPE_MSP_RESP = 0x7B,  // reply with 58 byte chunked binary
@@ -92,6 +93,7 @@ typedef enum
 
 typedef struct crsf_header_s
 {
+   // uint8_t device_address; // 0xC8 for FC, 0xEA for TX
     uint8_t sync_byte;   // CRSF_SYNC_BYTE
     uint8_t frame_size;  // counts size after this byte, so it must be the payload size + 2 (type and crc)
     uint8_t type;        // from crsf_frame_type_e
@@ -134,10 +136,10 @@ typedef struct crsfPayloadLinkstatistics_s
 
 typedef struct crsf_sensor_battery_s
 {
-    uint32_t voltage : 16;  // V * 10 big endian
-    uint32_t current : 16;  // A * 10 big endian
-    uint32_t capacity : 24; // mah big endian
-    uint32_t remaining : 8; // %
+    uint32_t voltage;  // V * 10 big endian
+    uint32_t current;  // A * 10 big endian
+    uint32_t capacity; // mah big endian
+    uint32_t remaining; // %
 } PACKED crsf_sensor_battery_t;
 
 typedef struct crsf_sensor_gps_s
