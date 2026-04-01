@@ -1,0 +1,193 @@
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+#include "adc.h"
+#include "dma.h"
+#include "usart.h"
+#include "gpio.h"
+
+/* Private includes ----------------------------------------------------------*/
+#include <stdbool.h>
+#include "crsf.h"
+#include "config.h"
+
+/* Constants and Macros ------------------------------------------------------*/
+#define MAP_SCALE_NUM   (CRSF_DIGITAL_CHANNEL_MAX - CRSF_DIGITAL_CHANNEL_MIN)
+#define MAP_SCALE_DEN   (ADC_MAX - ADC_MIN)
+#define MAP_OFFSET      (CRSF_DIGITAL_CHANNEL_MIN)
+
+#define ADC_MAX_VALUE           4095.0f
+#define VREF                    3.3f
+#define VOLTAGE_DIVIDER_GAIN    (30.0f / 10.0f)
+#define ADC_TO_BATTERY_VOLTAGE_SCALE ((VREF * VOLTAGE_DIVIDER_GAIN) / ADC_MAX_VALUE)
+#define SMA_WINDOW_SIZE         8
+#define ADC_INDEX_BATTERY       4
+#define INIT_PACKET_COUNT       500
+#define CMD_REPEAT_COUNT        5
+
+/* ADC buffer and RC variables -----------------------------------------------*/
+uint16_t ADC_BUF[10];
+
+int Aileron_value = 0, Elevator_value = 0, Throttle_value = 0, Rudder_value = 0;
+int previous_throttle = 191;
+
+uint16_t Aileron_samples[SMA_WINDOW_SIZE] = {0};
+uint16_t Elevator_samples[SMA_WINDOW_SIZE] = {0};
+uint16_t Throttle_samples[SMA_WINDOW_SIZE] = {0};
+uint16_t Rudder_samples[SMA_WINDOW_SIZE] = {0};
+
+uint8_t sample_index = 0;
+float batteryVoltage;
+
+const float warningVoltage = 7.8;
+const float dangerVoltage = 7.5;
+
+uint8_t crsfPacket[CRSF_PACKET_SIZE];
+uint8_t crsfCmdPacket[CRSF_CMD_PACKET_SIZE];
+int16_t rcChannels[CRSF_MAX_CHANNEL];
+uint32_t crsfTime = 0;
+
+int loopCount = 0;
+int currentPktRate = 0, currentPower = 0, currentDynamic = 0;
+int currentSetting = 0;
+
+uint32_t stickMovedMillis = 0;
+bool calStatus = false;
+
+/* Function Prototypes -------------------------------------------------------*/
+void checkBatteryStatus(float voltage);
+void processRCInputs(void);
+void handleStartupConfig(void);
+void handleInitCommandPhase(uint16_t count);
+static inline uint16_t fastMap4095(uint16_t x, uint16_t out_min, uint16_t out_max);
+float readBatteryVoltage(void);
+uint32_t micros(void);
+
+/* Functions -----------------------------------------------------------------*/
+
+void checkBatteryStatus(float voltage) {
+    HAL_GPIO_WritePin(GPIOC, BatVolWarning_Pin, voltage <= warningVoltage && voltage > dangerVoltage ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, BatVolDanger_Pin, voltage < dangerVoltage ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+void processRCInputs(void) {
+    Aileron_samples[sample_index]  = ADC_BUF[0];
+    Elevator_samples[sample_index] = ADC_BUF[1];
+    Throttle_samples[sample_index] = ADC_BUF[2];
+    Rudder_samples[sample_index]   = ADC_BUF[3];
+
+    sample_index = (sample_index + 1) % SMA_WINDOW_SIZE;
+
+    uint32_t a_sum = 0, e_sum = 0, t_sum = 0, r_sum = 0;
+    for (uint8_t i = 0; i < SMA_WINDOW_SIZE; i++) {
+        a_sum += Aileron_samples[i];
+        e_sum += Elevator_samples[i];
+        t_sum += Throttle_samples[i];
+        r_sum += Rudder_samples[i];
+    }
+
+    Aileron_value  = a_sum / SMA_WINDOW_SIZE;
+    Elevator_value = e_sum / SMA_WINDOW_SIZE;
+    Throttle_value = t_sum / SMA_WINDOW_SIZE;
+    Rudder_value   = r_sum / SMA_WINDOW_SIZE;
+
+    Aileron_value  = Aileron_value  * MAP_SCALE_DEN / 4095 + ADC_MIN;
+    Elevator_value = Elevator_value * MAP_SCALE_DEN / 4095 + ADC_MIN;
+    Throttle_value = Throttle_value * MAP_SCALE_DEN / 4095 + ADC_MIN;
+    Rudder_value   = Rudder_value   * MAP_SCALE_DEN / 4095 + ADC_MIN;
+
+    rcChannels[AILERON]  = fastMap4095(Aileron_value,  CRSF_DIGITAL_CHANNEL_MIN, CRSF_DIGITAL_CHANNEL_MAX);
+    rcChannels[ELEVATOR] = fastMap4095(Elevator_value, CRSF_DIGITAL_CHANNEL_MIN, CRSF_DIGITAL_CHANNEL_MAX);
+    rcChannels[THROTTLE] = fastMap4095(Throttle_value, CRSF_DIGITAL_CHANNEL_MIN, CRSF_DIGITAL_CHANNEL_MAX);
+    rcChannels[RUDDER]   = fastMap4095(Rudder_value,   CRSF_DIGITAL_CHANNEL_MIN, CRSF_DIGITAL_CHANNEL_MAX);
+}
+
+void handleStartupConfig(void) {
+    if (rcChannels[AILERON] < RC_MIN_COMMAND && rcChannels[ELEVATOR] > RC_MAX_COMMAND) {
+        currentPktRate = SETTING_1_PktRate;
+        currentPower = SETTING_1_Power;
+        currentDynamic = SETTING_1_Dynamic;
+        currentSetting = 1;
+    } else if (rcChannels[AILERON] > RC_MAX_COMMAND && rcChannels[ELEVATOR] > RC_MAX_COMMAND) {
+        currentPktRate = SETTING_2_PktRate;
+        currentPower = SETTING_2_Power;
+        currentDynamic = SETTING_2_Dynamic;
+        currentSetting = 2;
+    } else if (rcChannels[AILERON] < RC_MIN_COMMAND && rcChannels[ELEVATOR] < RC_MIN_COMMAND) {
+        currentSetting = 3;
+    } else if (rcChannels[AILERON] > RC_MAX_COMMAND && rcChannels[ELEVATOR] < RC_MIN_COMMAND) {
+        currentSetting = 4;
+    } else {
+        currentSetting = 0;
+    }
+}
+
+void handleInitCommandPhase(uint16_t count) {
+    if (count <= INIT_PACKET_COUNT) {
+        CRSF_PrepareDataPacket(crsfPacket, rcChannels);
+        CRSF_WritePacket(crsfPacket, CRSF_PACKET_SIZE);
+    } else if (count <= INIT_PACKET_COUNT + CMD_REPEAT_COUNT) {
+        if (currentSetting == 1 || currentSetting == 2)
+            CRSF_PrepareCmdPacket(crsfCmdPacket, ELRS_PKT_RATE_COMMAND, currentPktRate);
+        else if (currentSetting == 3)
+            CRSF_PrepareCmdPacket(crsfCmdPacket, ELRS_BIND_COMMAND, ELRS_START_COMMAND);
+        else if (currentSetting == 4)
+            CRSF_PrepareCmdPacket(crsfCmdPacket, ELRS_WIFI_COMMAND, ELRS_START_COMMAND);
+        CRSF_WritePacket(crsfCmdPacket, CRSF_CMD_PACKET_SIZE);
+    } else if (count <= INIT_PACKET_COUNT + CMD_REPEAT_COUNT * 2 && (currentSetting == 1 || currentSetting == 2)) {
+        CRSF_PrepareCmdPacket(crsfCmdPacket, ELRS_POWER_COMMAND, currentPower);
+        CRSF_WritePacket(crsfCmdPacket, CRSF_CMD_PACKET_SIZE);
+    } else if (count <= INIT_PACKET_COUNT + CMD_REPEAT_COUNT * 3 && (currentSetting == 1 || currentSetting == 2)) {
+        CRSF_PrepareCmdPacket(crsfCmdPacket, ELRS_DYNAMIC_POWER_COMMAND, currentDynamic);
+        CRSF_WritePacket(crsfCmdPacket, CRSF_CMD_PACKET_SIZE);
+    } else {
+        CRSF_PrepareDataPacket(crsfPacket, rcChannels);
+        CRSF_WritePacket(crsfPacket, CRSF_PACKET_SIZE);
+    }
+}
+
+static inline uint16_t fastMap4095(uint16_t x, uint16_t out_min, uint16_t out_max) {
+    return (uint16_t)(((uint32_t)x * (out_max - out_min)) / 4095 + out_min);
+}
+
+float readBatteryVoltage(void) {
+    return ADC_BUF[ADC_INDEX_BATTERY] * ADC_TO_BATTERY_VOLTAGE_SCALE;
+}
+
+uint32_t micros(void) {
+    return DWT->CYCCNT / (SystemCoreClock / 1000000);
+}
+
+/* Main Application Entry ----------------------------------------------------*/
+int main(void) {
+    HAL_Init();
+    SystemClock_Config();
+    MX_GPIO_Init();
+    MX_DMA_Init();
+    MX_ADC1_Init();
+    MX_USART1_UART_Init();
+
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ADC_BUF, 10);
+    for (uint8_t i = 0; i < CRSF_MAX_CHANNEL; i++) rcChannels[i] = CRSF_DIGITAL_CHANNEL_MIN;
+    HAL_GPIO_WritePin(UART_LED_GPIO_Port, UART_LED_Pin, GPIO_PIN_SET);
+
+    while (1) {
+        uint32_t currentMicros = micros();
+        if (currentMicros < crsfTime - CRSF_TIME_BETWEEN_FRAMES_US) crsfTime = currentMicros + CRSF_TIME_BETWEEN_FRAMES_US;
+
+        batteryVoltage = readBatteryVoltage();
+        checkBatteryStatus(batteryVoltage);
+
+        processRCInputs();
+        if (loopCount == 0) handleStartupConfig();
+
+        if (currentMicros > crsfTime) {
+            handleInitCommandPhase(loopCount);
+            loopCount++;
+            crsfTime = currentMicros + CRSF_TIME_BETWEEN_FRAMES_US;
+        }
+    }
+}
