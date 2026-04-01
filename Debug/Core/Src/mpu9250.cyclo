@@ -1,0 +1,7 @@
+../Core/Src/mpu9250.c:27:9:mpu_init	5
+../Core/Src/mpu9250.c:112:6:MPU_writeAccFullScaleRange	5
+../Core/Src/mpu9250.c:151:6:MPU_writeGyroFullScaleRange	5
+../Core/Src/mpu9250.c:189:6:MPU_readRawData	1
+../Core/Src/mpu9250.c:210:6:MPU_calibrateGyro	3
+../Core/Src/mpu9250.c:241:6:MPU_readProcessedData	1
+../Core/Src/mpu9250.c:264:6:MPU_calcAttitude	1
