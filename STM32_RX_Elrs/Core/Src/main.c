@@ -81,6 +81,7 @@ CrsfSerial_HandleTypeDef hcrsf;
 uint16_t ADC_BUF[1];
 uint32_t lastPacketMillis = 0;
 <<<<<<< HEAD
+
 uint32_t sendTiming;
 <<<<<<< HEAD
 uint32_t now;
