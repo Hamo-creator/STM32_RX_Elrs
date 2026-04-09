@@ -20,17 +20,25 @@ typedef enum {
 } eFailsafeAction;
 
 #define CRSF_PACKET_TIMEOUT_MS     100
+<<<<<<< HEAD
 #define CRSF_FAILSAFE_STAGE1_MS    900	//300
 
 #define TELEMETRY_WINDOW_US   1000   // ~1ms
 
 extern volatile bool telemetry_window_open;
 extern volatile uint32_t telemetry_window_deadline;
+=======
+#define CRSF_FAILSAFE_STAGE1_MS    300	//900
+
+#define TELEMETRY_WINDOW_US   1000   // ~1ms
+>>>>>>> baea64b (Update: CRSF parsing and telemetry improvments)
 
 extern uint8_t rx_dma_byte;  // One byte buffer
 extern volatile uint8_t crsf_tx_busy;
 
 extern volatile uint8_t g_last_crsf_packet_type;
+extern volatile uint8_t raw_type;
+extern volatile uint8_t struct_type;
 
 extern volatile uint8_t g_crsf_telemetry_to_send;
 extern uint8_t telemetry_tx_buffer[CRSF_MAX_PACKET_SIZE];
@@ -58,22 +66,18 @@ typedef struct {
     uint32_t lastReceive;
     uint32_t lastChannelsPacket;
     bool linkIsUp;
+    bool telemetry_window_open;
+    uint8_t rc_packet_count;
 
     // Telemetry Queue (for sending telemetry from FC to TX)
     uint8_t telemetry_tx_buffer[CRSF_MAX_PACKET_SIZE]; // Buffer for queued telemetry packet
     uint8_t telemetry_tx_len;           // Length of queued telemetry packet
-    volatile bool telemetry_poll_received; // Flag set when TX polls for telemetry
 
     // TX State
     volatile bool tx_busy;              // Flag indicating if UART TX is busy
 
     uint32_t passthroughBaud;
     int channels[CRSF_NUM_CHANNELS];
-
-    // Callbacks
-//    CrsfChannelsReceivedCallback_t on_channels_received; // Called when new RC channels arrive
-//    CrsfLinkStatisticsReceivedCallback_t on_link_statistics_received; // Called when link stats arrive
-    CrsfTelemetryPollReceivedCallback_t on_telemetry_poll_received; // Called when a telemetry poll is received
 
     // Event Handlers
     void (*onLinkUp)(void);

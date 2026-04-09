@@ -52,12 +52,17 @@ extern I2C_HandleTypeDef hi2c1;
 #define R2		2200.0f	// Ohm
 #define VREF	3.3f	// Reference voltage of ADC
 #define ADC_MAX_VALUE      4095.0f	// 12-bit ADC
-float batteryVoltage;
-uint16_t millivolts;
+float batteryVoltage = 0;
+uint16_t millivolts = 0;
 
-uint16_t voltage_dV;
+uint16_t voltage_dV = 0;
 
 uint8_t sendStatus = 6;
+uint32_t send_counter = 0;
+uint32_t error_counter = 0;
+
+volatile uint8_t raw_type;
+volatile uint8_t struct_type;
 
 /* USER CODE END PD */
 
@@ -72,11 +77,10 @@ uint8_t sendStatus = 6;
 
 // Global CRSF serial instance
 CrsfSerial_HandleTypeDef hcrsf;
-CrsfSerial_HandleTypeDef crsf_handle_rx;
 
 uint16_t ADC_BUF[1];
-uint16_t Buf[64];
 uint32_t lastPacketMillis = 0;
+<<<<<<< HEAD
 uint32_t sendTiming;
 <<<<<<< HEAD
 uint32_t now;
@@ -90,6 +94,9 @@ const uint32_t BATTERY_SEND_INTERVAL_MS = 40; // Send every 1 second
 uint32_t lastBatterySendTime = 0;
 const uint32_t BATTERY_SEND_INTERVAL_MS = 500; // Send every 1 second
 >>>>>>> 363fa39 (telemetry send upload)
+=======
+uint32_t now = 0;
+>>>>>>> baea64b (Update: CRSF parsing and telemetry improvments)
 
 #define UART_RX_BUFFER_SIZE 128
 uint8_t  uartRxBuf[UART_RX_BUFFER_SIZE];
@@ -97,8 +104,6 @@ uint16_t oldPos = 0;
 
 bool failsafeActive = false;
 int lastValidChannels[CRSF_NUM_CHANNELS];
-uint8_t telemetry_Channels[64];
-uint8_t telem_queue_status = 6;
 
 <<<<<<< HEAD
 volatile bool telemetry_window_open = false;
@@ -112,7 +117,6 @@ static uint32_t lastTelemetryUs = 0;
 float A_X, A_Y, A_Z, G_X, G_Y, G_Z, TEMPERATUE;
 float Roll, Pitch, Yaw;
 
-uint32_t prev_tick = 0;
 uint8_t status_i2c;
 
 // GPS
@@ -191,34 +195,31 @@ float GetBatteryVoltage(void) {
 }
 
 // This function should use the library's queue, not transmit directly.
-/*uint8_t sendBatteryVoltage(uint16_t millivolts) {
-    uint16_t voltage_cV = millivolts / 100; // convert to 0.01V units
+uint8_t sendBatteryTelemetry(uint16_t voltage_01V) {
 
-	uint8_t payload[7] = {0}; // Initialize to zero
-//	// Voltage (Little Endian)
-//	payload[0] = (uint8_t)(millivolts & 0xFF);
-//	payload[1] = (uint8_t)(millivolts >> 8);
+	uint8_t payload[8] = {0}; // Initialize to zero
 
-    // Voltage (BIG ENDIAN)
-    payload[0] = (voltage_cV >> 8) & 0xFF;
-    payload[1] = voltage_cV & 0xFF;
+    // 1. Voltage (Big Endian) - e.g., 126 for 12.6V
+    payload[0] = (voltage_01V >> 8) & 0xFF;
+    payload[1] = voltage_01V & 0xFF;
 
-    // Current (not measured → 0 mA)
+    // 2. Current (0.1A units) - Sending 0
     payload[2] = 0;
     payload[3] = 0;
 
-    // Fuel used (mAh → 0)
+    // 3. Fuel (3 bytes for mAh) - Sending 0
     payload[4] = 0;
     payload[5] = 0;
-
-    // Remaining capacity (percent → 0 if unknown)
     payload[6] = 0;
+
+    // 4. Remaining Percentage
+    payload[7] = 0;
 
 	// Queue the packet for transmission.
 	return CrsfSerial_QueuePacket(&hcrsf, CRSF_FRAMETYPE_BATTERY_SENSOR, payload, sizeof(payload));
-}*/
+}
 
-static uint8_t sendBatteryTelemetry(float voltage, float current, float capacity, float remaining){
+/*static uint8_t sendBatteryTelemetry(float voltage, float current, float capacity, float remaining){
 	crsf_sensor_battery_t crsfBat = {0};
 
 	// Values are MSB first (big Endian)
@@ -228,6 +229,7 @@ static uint8_t sendBatteryTelemetry(float voltage, float current, float capacity
 	crsfBat.remaining = (uint32_t)(remaining);				// Percent
 	// Queue the packet for transmission
 	return CrsfSerial_QueuePacket(&hcrsf, CRSF_FRAMETYPE_BATTERY_SENSOR, &crsfBat, sizeof(crsfBat));
+<<<<<<< HEAD
 }
 <<<<<<< HEAD
 
@@ -237,7 +239,14 @@ static inline uint32_t micros(void)
 }
 =======
 >>>>>>> 363fa39 (telemetry send upload)
+=======
+}*/
+>>>>>>> baea64b (Update: CRSF parsing and telemetry improvments)
 
+uint32_t micros(void)
+{
+    return __HAL_TIM_GET_COUNTER(&htim5);
+}
 /* USER CODE END 0 */
 
 /**
@@ -276,7 +285,10 @@ int main(void)
   MX_TIM3_Init();
   MX_I2C1_Init();
   MX_USART6_UART_Init();
+  MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
+
+  HAL_TIM_Base_Start(&htim5);
 
   ServoControl_Init();
 
@@ -337,6 +349,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 //	  sendTiming = HAL_GetTick();
 
@@ -402,39 +415,38 @@ int main(void)
 
 =======
 	  sendTiming = HAL_GetTick();
+=======
+	  now = micros();
+>>>>>>> baea64b (Update: CRSF parsing and telemetry improvments)
 
 	  CrsfSerial_Loop(&hcrsf);
 
-      // ====================================================================
-      //  PHASE 2: Telemetry Data Queuing
-      // ====================================================================
+	  if (hcrsf.rc_packet_count >= 32){
+		  // Only send if the RX has opened the window (avoiding collisions)
+		   if (hcrsf.telemetry_window_open && hcrsf.linkIsUp) {
+				batteryVoltage = GetBatteryVoltage();
 
-	  // Check if it's time to send the battery voltage
-	  if ((CrsfSerial_IsLinkUp(&hcrsf)) && (HAL_GetTick() - lastBatterySendTime >= BATTERY_SEND_INTERVAL_MS)) {
-	  //if (!CrsfSerial_IsLinkUp(&hcrsf)) {
-		  lastBatterySendTime = HAL_GetTick(); // Update the timestamp
-		  // Get voltage and queue the packet for sending
-		  // The CrsfSerial_Loop will handle the actual transmission when it can.
-		  batteryVoltage = GetBatteryVoltage(); // e.g., returns 12.6f
-		  millivolts = batteryVoltage * 1000; // Convert to mV
-          voltage_dV = millivolts / 100; // CRSF uses 0.1V units
+				// CRSF wants 0.1V units. 12.6V becomes 126.
+				voltage_dV = (uint16_t)(batteryVoltage * 10.0f);
 
-/*          crsf_sensor_battery_t battery_payload = {0};
-          battery_payload.voltage = voltage_dV;
-          // Other fields (current, capacity, remaining_percent) can be set here if available
+				sendStatus = sendBatteryTelemetry(voltage_dV);
 
-          // Queue the battery telemetry packet. It will be sent when polled by the TX.
-          telem_queue_status = Crsf_QueueTelemetryPacket(&crsf_handle_rx, CRSF_FRAMETYPE_BATTERY_SENSOR, (uint8_t*)&battery_payload, sizeof(crsf_sensor_battery_t));
-          for (int i = 0; i < 64; i++){
-        	  telemetry_Channels[i] = hcrsf.telemetry_tx_buffer[i];
-          }*/
-		  // Use the provided function to queue the packet.
-		  // Do not check the return status here in the main loop.
-		  // The library is responsible for managing the transmission.
-//		  sendStatus = sendBatteryVoltage(millivolts);
-          sendStatus = sendBatteryTelemetry(batteryVoltage, 10.0, 45.0, 50);
-	  }
+				if (sendStatus == HAL_OK){
+					send_counter++;
+					// RESET: Reset the counter and close the window
+					hcrsf.rc_packet_count = 0;
+					hcrsf.telemetry_window_open = false;
+				}
+			}else {
+		        /* Safety: If we reached 128 packets but the window isn't open,
+		           it might mean we missed the sync. You could choose to reset
+		           the counter anyway or wait for the next RC packet.
+		        */
+				hcrsf.rc_packet_count = 0;
+		    }
+		}
 
+<<<<<<< HEAD
       // ====================================================================
       //  PHASE 3: Telemetry Response to Polls
       // ====================================================================
@@ -450,15 +462,19 @@ int main(void)
           }
       }*/
 >>>>>>> 363fa39 (telemetry send upload)
+=======
+>>>>>>> baea64b (Update: CRSF parsing and telemetry improvments)
 //	  if(sendStatus == 0) {
 //		  HAL_GPIO_TogglePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin);
 //	  }
 
-	  MPU_calcAttitude(&hi2c1);
+	  if(sendStatus == 0) {
+		  MPU_calcAttitude(&hi2c1);
 
-	  Roll = attitude.r;
-	  Pitch = attitude.p;
-	  Yaw = attitude.y;
+		  Roll = attitude.r;
+		  Pitch = attitude.p;
+		  Yaw = attitude.y;
+	  }
 
 //	  gps = NEO6M_GetData();
 //	  if (gps->fix)

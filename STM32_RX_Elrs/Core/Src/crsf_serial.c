@@ -5,8 +5,6 @@
 extern uint8_t uartRxBuf[];
 extern uint16_t oldPos;
 
-volatile uint8_t g_last_crsf_packet_type = 0;
-
 void CrsfSerial_Init(CrsfSerial_HandleTypeDef *hcrsf, UART_HandleTypeDef *huart, uint32_t baud) {
     hcrsf->huart = huart;
     hcrsf->baud = baud;
@@ -72,23 +70,31 @@ static void CrsfSerial_UnpackChannels(CrsfSerial_HandleTypeDef *hcrsf, const uin
 
 static void HandlePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t len) {
     crsf_header_t *hdr = (crsf_header_t *)hcrsf->rxBuf;
+    raw_type = hcrsf->rxBuf[2]; // Index 2 is always the type
+    struct_type = hdr->type;
 
-    g_last_crsf_packet_type = hdr->type;
-
+//    switch (packet_type) {
     switch (hdr->type) {
         case CRSF_FRAMETYPE_RC_CHANNELS_PACKED:
             CrsfSerial_UnpackChannels(hcrsf, hdr->data); // <--- UNPACK channels into hcrsf->channels
             if (hcrsf->onPacketChannels) hcrsf->onPacketChannels();
             hcrsf->lastChannelsPacket = HAL_GetTick();
             hcrsf->linkIsUp = true;
+<<<<<<< HEAD
             /* 🔑 RC frame edge for FC */
             telemetry_window_open = true;
             //telemetry_window_deadline = micros() + TELEMETRY_WINDOW_US;
+=======
+            hcrsf->telemetry_window_open = true;
+            hcrsf->rc_packet_count++;
+            /* 🔑 RC frame edge for FC */
+>>>>>>> baea64b (Update: CRSF parsing and telemetry improvments)
             break;
         case CRSF_FRAMETYPE_LINK_STATISTICS:
             memcpy(&hcrsf->linkStatistics, hdr->data, sizeof(crsfLinkStatistics_t));
             if (hcrsf->onPacketLinkStatistics) hcrsf->onPacketLinkStatistics(&hcrsf->linkStatistics);
             break;
+<<<<<<< HEAD
         case CRSF_FRAMETYPE_GPS:
             memcpy(&hcrsf->gpsSensor, hdr->data, sizeof(crsf_sensor_gps_t));
             if (hcrsf->onPacketGps) hcrsf->onPacketGps(&hcrsf->gpsSensor);
@@ -123,6 +129,10 @@ static void HandlePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t len) {
           	    HAL_GPIO_TogglePin(DPIN_LED_GPIO_Port, DPIN_LED_Pin);
             }
 >>>>>>> 363fa39 (telemetry send upload)
+=======
+        case CRSF_FRAMETYPE_COMMAND:
+            /* 🔑 RC frame edge for FC */
+>>>>>>> baea64b (Update: CRSF parsing and telemetry improvments)
             break;
     }
 }
@@ -219,7 +229,11 @@ uint8_t CrsfSerial_QueuePacket(CrsfSerial_HandleTypeDef *hcrsf, uint8_t type, co
     // If another packet is already waiting, return an error.
     // (A more advanced queue would handle this better).
 
+<<<<<<< HEAD
     uint8_t buf[CRSF_MAX_PACKET_SIZE];
+=======
+    uint8_t *buf = hcrsf->telemetry_tx_buffer;
+>>>>>>> baea64b (Update: CRSF parsing and telemetry improvments)
     buf[0] = RADIO_ADDRESS;	//CRSF_SYNC_BYTE;
     buf[1] = len + 2;
     buf[2] = type;

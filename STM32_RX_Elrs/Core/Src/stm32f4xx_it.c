@@ -303,8 +303,6 @@ void DMA2_Stream7_IRQHandler(void)
   HAL_DMA_IRQHandler(&hdma_usart1_tx);
   /* USER CODE BEGIN DMA2_Stream7_IRQn 1 */
 
-  //extern void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart);
-  //HAL_UART_TxCpltCallback(&huart1);
 
   /* USER CODE END DMA2_Stream7_IRQn 1 */
 }
